@@ -1,105 +1,59 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
-import math
+import numpy as np
+import joblib
+import json
+import os
 
-# =========================================================
-# Page configuration
-# =========================================================
 st.set_page_config(
-    page_title="P1 Sepsis Phenotype Calculator",
+    page_title="P1 Sepsis Phenotype ML Calculator",
     page_icon="🧬",
     layout="centered"
 )
 
-# =========================================================
-# Helper functions
-# =========================================================
-def sigmoid(x: float) -> float:
-    return 1 / (1 + math.exp(-x))
-
+@st.cache_resource
+def load_artifacts():
+    model = joblib.load("p1_ml_model.pkl")
+    with open("p1_model_features.json", "r", encoding="utf-8") as f:
+        features = json.load(f)
+    with open("p1_model_metadata.json", "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    return model, features, metadata
 
 def lactate_clearance_pct(baseline_lactate: float, lactate_6h: float) -> float:
     if baseline_lactate <= 0:
         return 0.0
     return (baseline_lactate - lactate_6h) / baseline_lactate * 100
 
-
-def bedside_rule(mean_vis_0_6h: float, baseline_lactate: float, lactate_clearance: float) -> int:
-    """
-    Early bedside enrichment rule for the P1 decoupled phenotype.
-
-    Rule-positive:
-    - Mean VIS 0–6 h > 20
-    - Baseline lactate > 4 mmol/L
-    - Lactate clearance < 10%
-    """
-    return int(
-        (mean_vis_0_6h > 20)
-        and (baseline_lactate > 4)
-        and (lactate_clearance < 10)
+def bedside_rule(mean_vis_0_6h: float, baseline_lactate: float, lactate_clearance: float) -> bool:
+    return (
+        mean_vis_0_6h > 20
+        and baseline_lactate > 4
+        and lactate_clearance < 10
     )
 
-
-def p1_probability_model(
-    mean_vis_0_6h: float,
-    max_vis_0_6h: float,
-    baseline_lactate: float,
-    lactate_6h: float,
-    lactate_clearance: float,
-    ph_min_0_6h: float,
-    anion_gap_max_0_6h: float,
-):
-    """
-    Demonstration risk score for early P1 phenotype enrichment.
-
-    This is a research demonstration model designed to reflect the manuscript
-    concept: high vasoactive support with persistent hyperlactatemia suggests
-    hemodynamic-metabolic decoupling.
-
-    The rule-based classification remains the primary interpretable tool.
-    """
-    lp = (
-        -5.20
-        + 0.035 * mean_vis_0_6h
-        + 0.010 * max_vis_0_6h
-        + 0.42 * baseline_lactate
-        + 0.30 * lactate_6h
-        - 0.035 * lactate_clearance
-        - 1.20 * (ph_min_0_6h - 7.35)
-        + 0.055 * anion_gap_max_0_6h
-    )
-    return sigmoid(lp)
-
-
-def category_from_probability(prob: float) -> str:
+def probability_category(prob: float) -> str:
     if prob < 0.05:
-        return "Low likelihood"
+        return "Low ML-predicted P1 probability"
     elif prob < 0.15:
-        return "Intermediate likelihood"
+        return "Intermediate ML-predicted P1 probability"
     elif prob < 0.30:
-        return "High likelihood"
-    else:
-        return "Very high likelihood"
+        return "High ML-predicted P1 probability"
+    return "Very high ML-predicted P1 probability"
 
+model, features, metadata = load_artifacts()
+threshold = float(metadata.get("classification_threshold", 0.5))
 
-# =========================================================
-# Header
-# =========================================================
-st.title("P1 Sepsis Phenotype Calculator")
+st.title("P1 Sepsis Phenotype ML Calculator")
 
 st.markdown(
     """
-This research calculator supports early identification of the
-**hemodynamically–metabolically decoupled sepsis phenotype (P1)** using early
-VIS–lactate dynamics.
+This web calculator estimates **machine-learning predicted probability** of the
+hemodynamically–metabolically decoupled sepsis phenotype (**P1**) using early
+0–6 h VIS–lactate dynamics.
 
-The core bedside enrichment rule is based on three clinically interpretable
-features within the first 6 hours after ICU admission:
-
-- Mean vasoactive-inotropic score (VIS) 0–6 h
-- Baseline serum lactate
-- Early lactate clearance
+The model was trained in the MIMIC-IV derivation cohort and externally evaluated
+in eICU. The bedside rule is shown alongside the model output for interpretability.
 """
 )
 
@@ -107,189 +61,149 @@ st.warning(
     "Research use only. This calculator is not a medical device and should not be used as a standalone clinical decision-making tool."
 )
 
-st.divider()
-
-# =========================================================
-# Sidebar inputs
-# =========================================================
 st.sidebar.header("Early 0–6 h Inputs")
 
 mean_vis_0_6h = st.sidebar.number_input(
     "Mean VIS 0–6 h",
-    min_value=0.0,
-    max_value=300.0,
-    value=25.0,
-    step=1.0,
+    min_value=0.0, max_value=300.0, value=25.0, step=1.0,
     help="Mean vasoactive-inotropic score during the first 6 hours after ICU admission."
 )
 
 max_vis_0_6h = st.sidebar.number_input(
     "Maximum VIS 0–6 h",
-    min_value=0.0,
-    max_value=300.0,
-    value=40.0,
-    step=1.0,
+    min_value=0.0, max_value=300.0, value=40.0, step=1.0,
     help="Maximum vasoactive-inotropic score during the first 6 hours."
 )
 
 baseline_lactate = st.sidebar.number_input(
     "Baseline lactate (mmol/L)",
-    min_value=0.0,
-    max_value=30.0,
-    value=5.0,
-    step=0.1,
+    min_value=0.0, max_value=30.0, value=5.0, step=0.1,
     help="Initial serum lactate near ICU admission."
 )
 
 lactate_6h = st.sidebar.number_input(
     "Lactate at 6 h (mmol/L)",
-    min_value=0.0,
-    max_value=30.0,
-    value=4.8,
-    step=0.1,
+    min_value=0.0, max_value=30.0, value=4.8, step=0.1,
     help="Serum lactate around 6 hours after ICU admission."
 )
 
-ph_min_0_6h = st.sidebar.number_input(
-    "Minimum pH 0–6 h",
-    min_value=6.80,
-    max_value=7.80,
-    value=7.25,
-    step=0.01,
-    help="Lowest arterial or venous pH during the first 6 hours."
+mean_lactate_0_6h = st.sidebar.number_input(
+    "Mean lactate 0–6 h (mmol/L)",
+    min_value=0.0, max_value=30.0, value=4.9, step=0.1,
+    help="Mean serum lactate during the first 6 hours."
 )
 
-anion_gap_max_0_6h = st.sidebar.number_input(
-    "Maximum anion gap 0–6 h",
-    min_value=0.0,
-    max_value=60.0,
-    value=18.0,
-    step=0.5,
-    help="Maximum anion gap during the first 6 hours."
-)
-
-# =========================================================
-# Calculations
-# =========================================================
 clearance = lactate_clearance_pct(baseline_lactate, lactate_6h)
 
-rule_positive = bedside_rule(
-    mean_vis_0_6h=mean_vis_0_6h,
-    baseline_lactate=baseline_lactate,
-    lactate_clearance=clearance
-)
+input_dict = {
+    "mean_vis_0_6h": mean_vis_0_6h,
+    "max_vis_0_6h": max_vis_0_6h,
+    "baseline_lactate": baseline_lactate,
+    "mean_lactate_0_6h": mean_lactate_0_6h,
+    "lactate_clearance_6h_pct": clearance,
+}
 
-p1_prob = p1_probability_model(
-    mean_vis_0_6h=mean_vis_0_6h,
-    max_vis_0_6h=max_vis_0_6h,
-    baseline_lactate=baseline_lactate,
-    lactate_6h=lactate_6h,
-    lactate_clearance=clearance,
-    ph_min_0_6h=ph_min_0_6h,
-    anion_gap_max_0_6h=anion_gap_max_0_6h,
-)
+X_input = pd.DataFrame([[input_dict[f] for f in features]], columns=features)
 
-# =========================================================
-# Results display
-# =========================================================
-st.subheader("Early P1 Enrichment Results")
+ml_probability = float(model.predict_proba(X_input)[0, 1])
+ml_positive = ml_probability >= threshold
+rule_positive = bedside_rule(mean_vis_0_6h, baseline_lactate, clearance)
+
+st.divider()
+st.subheader("Early P1 Prediction Results")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric("Lactate clearance", f"{clearance:.1f}%")
+    st.metric("ML-predicted P1 probability", f"{ml_probability * 100:.1f}%")
 
 with col2:
-    st.metric("Bedside rule", "Positive" if rule_positive == 1 else "Negative")
+    st.metric("ML classification", "Positive" if ml_positive else "Negative")
+    st.caption(f"Threshold: {threshold:.3f}")
 
 with col3:
-    st.metric("Estimated P1 likelihood", f"{p1_prob * 100:.1f}%")
+    st.metric("Bedside rule", "Positive" if rule_positive else "Negative")
 
-if rule_positive == 1:
-    st.error(
-        "Rule-positive profile: high early VIS, elevated baseline lactate, and poor lactate clearance. This pattern is consistent with enrichment for the P1 decoupled phenotype."
-    )
+st.markdown("### Probability category")
+if ml_positive:
+    st.error(probability_category(ml_probability))
 else:
-    st.success(
-        "Rule-negative profile: the patient does not meet the prespecified bedside enrichment rule for the P1 decoupled phenotype."
-    )
+    st.info(probability_category(ml_probability))
 
-st.markdown("### Model-based likelihood category")
-st.info(category_from_probability(p1_prob))
+st.markdown("### Input-derived features")
+feature_df = pd.DataFrame({
+    "Feature": [
+        "Mean VIS 0–6 h",
+        "Maximum VIS 0–6 h",
+        "Baseline lactate",
+        "Lactate at 6 h",
+        "Mean lactate 0–6 h",
+        "Lactate clearance",
+    ],
+    "Value": [
+        f"{mean_vis_0_6h:.1f}",
+        f"{max_vis_0_6h:.1f}",
+        f"{baseline_lactate:.1f} mmol/L",
+        f"{lactate_6h:.1f} mmol/L",
+        f"{mean_lactate_0_6h:.1f} mmol/L",
+        f"{clearance:.1f}%",
+    ],
+})
+st.dataframe(feature_df, use_container_width=True, hide_index=True)
 
-# =========================================================
-# Rule details
-# =========================================================
 st.markdown("### Bedside rule components")
-
-rule_df = pd.DataFrame(
-    {
-        "Component": [
-            "Mean VIS 0–6 h > 20",
-            "Baseline lactate > 4 mmol/L",
-            "Lactate clearance < 10%",
-        ],
-        "Patient value": [
-            f"{mean_vis_0_6h:.1f}",
-            f"{baseline_lactate:.1f} mmol/L",
-            f"{clearance:.1f}%",
-        ],
-        "Criterion met": [
-            "Yes" if mean_vis_0_6h > 20 else "No",
-            "Yes" if baseline_lactate > 4 else "No",
-            "Yes" if clearance < 10 else "No",
-        ],
-    }
-)
-
+rule_df = pd.DataFrame({
+    "Component": [
+        "Mean VIS 0–6 h > 20",
+        "Baseline lactate > 4 mmol/L",
+        "Lactate clearance < 10%",
+    ],
+    "Patient value": [
+        f"{mean_vis_0_6h:.1f}",
+        f"{baseline_lactate:.1f} mmol/L",
+        f"{clearance:.1f}%",
+    ],
+    "Criterion met": [
+        "Yes" if mean_vis_0_6h > 20 else "No",
+        "Yes" if baseline_lactate > 4 else "No",
+        "Yes" if clearance < 10 else "No",
+    ],
+})
 st.dataframe(rule_df, use_container_width=True, hide_index=True)
 
-# =========================================================
-# Interpretation
-# =========================================================
 st.divider()
 st.subheader("Interpretation")
 
 st.markdown(
     """
-The P1 phenotype represents a high-risk pattern characterized by **discordance
-between macro-circulatory support and micro-circulatory/metabolic recovery**.
-Clinically, this appears as substantial vasoactive requirement with persistent
-hyperlactatemia and impaired lactate clearance.
+The ML model estimates early similarity to the P1 trajectory phenotype before the
+full 72-hour VIS–lactate trajectory is available. The bedside rule provides a
+transparent enrichment signal, whereas the ML probability summarizes the combined
+dynamic pattern using the locked model artifact.
 
-The bedside rule is designed for **early enrichment**, not definitive diagnosis.
-Its role is to identify patients who may resemble the P1 trajectory phenotype
-before the full 72-hour trajectory is available.
+A positive ML classification or rule-positive profile should be interpreted as
+**research enrichment for the P1 phenotype**, not as a definitive bedside diagnosis.
 """
 )
 
-# =========================================================
-# Model information and disclaimer
-# =========================================================
 with st.expander("Model information and disclaimer"):
     st.markdown(
-        """
-**Primary rule**
+        f"""
+**Model type:** {metadata.get("model_name", "ML model")} dynamic-only early prediction model
 
-A patient is rule-positive when all three conditions are met:
+**Training dataset:** {metadata.get("training_dataset", "MIMIC-IV")}
 
-1. Mean VIS 0–6 h > 20  
-2. Baseline lactate > 4 mmol/L  
-3. Lactate clearance < 10%  
+**External validation dataset:** {metadata.get("external_validation_dataset", "eICU")}
 
-**Intended use**
+**Features used by the deployed model:**
 
-This calculator is intended for academic demonstration, research communication,
-and reproducibility support. It is not intended to guide treatment decisions.
+{chr(10).join([f"- `{f}`" for f in features])}
 
-**Important limitation**
+**Classification threshold:** {threshold:.3f}
 
-The probability score shown here is a demonstration score. For formal publication
-or clinical research deployment, the coefficients should be replaced by the final
-model coefficients derived from the locked analysis dataset.
+**Disclaimer:** This calculator is intended for academic demonstration and research
+communication only. It is not a medical device and should not replace clinical judgment.
 """
     )
 
-st.caption(
-    "P1 sepsis phenotype research calculator. For academic and research use only."
-)
+st.caption("P1 sepsis phenotype ML calculator. For academic and research use only.")
