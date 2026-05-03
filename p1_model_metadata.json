@@ -1,0 +1,22 @@
+{
+  "model_name": "XGBoost",
+  "model_type": "dynamic-only early P1 prediction model",
+  "training_dataset": "MIMIC-IV derivation cohort",
+  "external_validation_dataset": "eICU Collaborative Research Database",
+  "target": "P1 membership assigned by 72-hour VIS-lactate trajectory phenotype",
+  "features": [
+    "mean_vis_0_6h",
+    "max_vis_0_6h",
+    "baseline_lactate",
+    "mean_lactate_0_6h",
+    "lactate_clearance_6h_pct"
+  ],
+  "threshold_source": "Youden index from MIMIC internal validation split",
+  "classification_threshold": 0.32240384817123413,
+  "bedside_rule": {
+    "mean_vis_0_6h": "> 20",
+    "baseline_lactate": "> 4 mmol/L",
+    "lactate_clearance_6h_pct": "< 10%"
+  },
+  "important_note": "For research demonstration only. Not for clinical decision-making."
+}
