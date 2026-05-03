@@ -1,35 +1,24 @@
-# P1 Sepsis Phenotype Calculator
+# P1 Sepsis Phenotype ML Calculator
 
-A Streamlit-based research calculator for early identification of the hemodynamically–metabolically decoupled sepsis phenotype.
+A Streamlit-based machine-learning research calculator for early identification of the hemodynamically–metabolically decoupled sepsis phenotype (P1).
 
-## Background
+## Model
 
-This calculator is designed to support academic communication of a sepsis phenotyping framework based on early vasoactive-inotropic score (VIS) and serum lactate dynamics.
+The deployed model uses early 0–6 h VIS–lactate dynamic features and was trained in the MIMIC-IV derivation cohort. The model was externally evaluated in eICU.
 
-The P1 phenotype represents a high-risk pattern characterized by discordance between macro-circulatory support and micro-circulatory/metabolic recovery.
-
-## Bedside enrichment rule
-
-A patient is considered rule-positive when all three criteria are met:
-
-1. Mean VIS 0–6 h > 20
-2. Baseline lactate > 4 mmol/L
-3. Lactate clearance < 10%
-
-## Inputs
+## Features
 
 - Mean VIS 0–6 h
 - Maximum VIS 0–6 h
 - Baseline lactate
-- Lactate at 6 h
-- Minimum pH 0–6 h
-- Maximum anion gap 0–6 h
+- Mean lactate 0–6 h
+- Lactate clearance 0–6 h
 
 ## Outputs
 
-- Lactate clearance
+- ML-predicted P1 probability
+- ML classification using the MIMIC-derived threshold
 - Bedside rule status
-- Estimated P1 likelihood
 - Rule component table
 
 ## Disclaimer
